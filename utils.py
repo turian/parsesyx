@@ -1,23 +1,17 @@
-# Adapted from https://github.com/Nintorac/NeuralDX7/
-
-import glob
-import json
-import os.path
-from functools import reduce
 from itertools import chain
 from pathlib import Path
 
 import bitstruct
 import mido
 import numpy as np
-from tqdm import tqdm as tqdm
+import torch
 
-from dx7_constants import (
-    ARTIFACTS_ROOT,
-    N_OSC,
+from constants import (
+    MAX_VALUE,
     N_VOICES,
     VOICE_KEYS,
     VOICE_PARAMETER_RANGES,
+    checksum,
     header_bytes,
     header_struct,
     take,
@@ -26,11 +20,23 @@ from dx7_constants import (
     voice_struct,
 )
 
+
+def mask_parameters(x, voice_keys=VOICE_KEYS, inf=1e9):
+    device = x.device
+    mask_item_f = lambda x: torch.arange(MAX_VALUE).to(device) > max(x)
+    mapper = map(mask_item_f, map(VOICE_PARAMETER_RANGES.get, voice_keys))
+
+    mask = torch.stack(list(mapper))
+
+    return torch.masked_fill(x, mask, -inf)
+
+
 # %%
 
 
 def consume_syx(path):
-    path = Path(path)
+
+    path = Path(path).expanduser()
     try:
         preset = mido.read_syx_file(path.as_posix())[0]
     except IndexError as e:
@@ -62,11 +68,28 @@ def consume_syx(path):
         return None
 
 
-if __name__ == "__main__":
-    preset_paths = glob.glob("DX7_AllTheWeb/**/*syx", recursive=True)
+def dx7_bulk_pack(voices):
 
-    for p in preset_paths:
-        if not os.path.isfile(p):
-            continue
-        for v in consume_syx(p):
-            print(json.dumps(v))
+    HEADER = (
+        int("0x43", 0),
+        int("0x00", 0),
+        int("0x09", 0),
+        int("0x20", 0),
+        int("0x00", 0),
+    )
+    assert len(voices) == 32
+    voices_bytes = bytes()
+    for voice in voices:
+        voice_bytes = voice_struct.pack(dict(zip(VOICE_KEYS, voice)))
+        voices_bytes += voice_bytes
+
+    patch_checksum = [checksum(voices_bytes)]
+
+    data = bytes(HEADER) + voices_bytes + bytes(patch_checksum)
+
+    return mido.Message("sysex", data=data)
+
+
+def generate_syx(patch_list):
+
+    dx7_struct
