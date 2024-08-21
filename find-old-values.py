@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 key_values = defaultdict(list)
 
-for l in tqdm(open("main.json")):
+for l in tqdm(open("uniqmain.json")):
     o = json.loads(l)
     if o:
         for k, v in o.items():
